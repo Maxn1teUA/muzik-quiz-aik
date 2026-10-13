@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Музична вікторина — ведучий</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito+Sans:wght@400;600;700;800&display=swap">
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+:root{
+  color-scheme:dark;
+  --stage:#1B1446; --panel:#251C5C; --line:#3B3180;
+  --paper:#FBF7EE; --haze:#BDB5EA; --flame:#FF7A3D; --sun:#F2C14E;
+  --good:#52C98E; --good-bg:#173F33; --bad:#FF6B78; --bad-bg:#4A1F33;
+  --display:'Fredoka','Trebuchet MS',Arial,sans-serif;
+  --body:'Nunito Sans','Segoe UI',Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{background:var(--stage);color:var(--paper);font:16px/1.5 var(--body);padding:20px 16px 48px}
+.wrap{max-width:1200px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+h1,h2{font-family:var(--display);font-weight:600;line-height:1.1;margin:0;text-wrap:balance}
+p{margin:0}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.brand{font-family:var(--display);font-size:28px;font-weight:600}
+.brand span{color:var(--flame)}
+.label{font-size:13px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--sun)}
+.muted{color:var(--haze)} .note{font-size:14px;color:var(--haze)}
+.err{color:var(--bad);font-weight:700;min-height:24px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:22px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.center{text-align:center;align-items:center}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.spacer{flex:1}
+button,input,select{font:inherit}
+button{cursor:pointer;border-radius:12px;padding:12px 18px;font-weight:800;background:var(--panel);color:var(--paper);border:1px solid var(--line);min-height:46px}
+button:hover:not(:disabled){border-color:var(--haze)}
+button.primary{background:var(--flame);border-color:var(--flame);color:var(--stage)}
+button.big{font-size:20px;min-height:60px;padding:14px 28px}
+button.danger{background:transparent;border-color:var(--bad);color:var(--bad)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible,input:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid var(--sun);outline-offset:2px}
+input{background:var(--stage);color:var(--paper);border:2px solid var(--line);border-radius:14px;padding:12px 16px;min-height:52px}
+input.code{font-family:var(--display);font-size:44px;letter-spacing:.25em;text-align:center;width:100%;max-width:340px}
+select{background:var(--stage);color:var(--paper);border:1px solid var(--line);border-radius:10px;padding:8px 10px;min-height:44px}
+.pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:4px 12px;font-size:14px;font-weight:800;white-space:nowrap}
+.pill.good{background:var(--good-bg);color:var(--good)} .pill.bad{background:var(--bad-bg);color:var(--bad)}
+.pill.wait{background:var(--line);color:var(--haze)} .pill.sun{background:var(--sun);color:var(--stage)}
+.pill.warn{background:var(--sun);color:var(--stage);font-size:12px;padding:2px 10px}
+.pill.off{background:transparent;border:1px solid var(--line);color:var(--haze);font-size:12px;padding:2px 10px}
+
+/* lobby */
+.lobby{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:20px;align-items:start}
+.codebox{background:var(--paper);color:var(--stage);border-radius:22px;padding:26px;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center}
+.codebox .label{color:var(--stage)}
+.codebox .code{font-family:var(--display);font-size:clamp(64px,10vw,120px);font-weight:700;letter-spacing:.08em;line-height:1}
+.count{font-family:var(--display);font-size:48px;color:var(--sun);line-height:1}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{display:inline-flex;align-items:center;gap:4px;background:var(--stage);border:1px solid var(--line);border-radius:999px;padding:6px 6px 6px 14px;font-weight:800;max-width:100%}
+.chip.off{opacity:.55}
+.chip span{overflow-wrap:anywhere}
+.chip button{min-height:30px;min-width:30px;padding:0;border-radius:50%;border:0;background:transparent;color:var(--haze)}
+.chip button:hover{color:var(--bad)}
+
+/* game */
+.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:12px}
+.grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:900px){.grid,.lobby{grid-template-columns:minmax(0,1fr)}}
+.qhead{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.qtext{font-size:26px;line-height:1.35;font-weight:600}
+.timerrow{display:flex;align-items:center;gap:10px}
+.timer{flex:1;height:10px;border-radius:999px;background:var(--stage);overflow:hidden}
+.timer i{display:block;height:100%;background:var(--sun);transition:width .5s linear}
+.timer.low i{background:var(--flame)}
+.secs{font-family:var(--display);font-size:24px;color:var(--sun);font-variant-numeric:tabular-nums;min-width:56px;text-align:right}
+details.key{background:var(--stage);border-radius:14px;padding:12px 14px}
+details.key summary{cursor:pointer;font-weight:800;color:var(--sun)}
+details.key b{display:block;font-family:var(--display);font-size:28px;font-weight:600;color:var(--flame);margin-top:6px}
+.alist{list-style:none;margin:0;padding:0}
+.alist li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px;align-items:center;padding:12px 0;border-top:1px solid var(--line)}
+.alist li:first-child{border-top:0}
+.alist .who{font-weight:800;overflow-wrap:anywhere}
+.alist .txt{grid-column:1;overflow-wrap:anywhere;font-size:19px}
+.alist .txt.none{color:var(--haze);font-style:italic;font-size:15px}
+.alist .acts{grid-column:2;grid-row:1 / span 2;display:flex;gap:6px;align-items:center}
+.alist .acts button{min-height:40px;min-width:44px;padding:6px 10px}
+.alist .acts button.on-good{background:var(--good-bg);border-color:var(--good);color:var(--good)}
+.alist .acts button.on-bad{background:var(--bad-bg);border-color:var(--bad);color:var(--bad)}
+.tablebox{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th,td{padding:8px 6px;text-align:center;border-bottom:1px solid var(--line);font-size:14px}
+th{color:var(--haze)} th.cur{color:var(--sun)}
+td.name,th.name{text-align:left;font-weight:800;overflow-wrap:anywhere;max-width:170px}
+td.total{font-weight:800;font-size:18px;color:var(--sun)}
+.c-good{color:var(--good);font-weight:800}.c-bad{color:var(--bad);font-weight:800}.c-none{color:var(--line)}
+
+/* podium */
+.podium{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;align-items:end;width:100%;max-width:760px}
+.step{display:flex;flex-direction:column;align-items:center;gap:8px;min-width:0}
+.step .names{display:flex;flex-direction:column;gap:2px;text-align:center;font-weight:800;font-size:22px;overflow-wrap:anywhere;min-height:30px}
+.step .pts{color:var(--haze);font-size:15px}
+.step .block{width:100%;border-radius:16px 16px 4px 4px;display:flex;justify-content:center;padding-top:12px;font-family:var(--display);font-weight:700;color:var(--stage)}
+.p1 .block{height:200px;background:var(--sun);font-size:72px}
+.p2 .block{height:150px;background:var(--paper);font-size:56px}
+.p3 .block{height:110px;background:var(--flame);font-size:48px}
+.empty .block{opacity:.25}
+.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:var(--paper);color:var(--stage);padding:10px 16px;border-radius:12px;font-weight:800;max-width:calc(100% - 32px);z-index:5}
+[hidden]{display:none!important}
+@media (prefers-reduced-motion:reduce){.timer i{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">Музична <span>вікторина</span></div>
+    <span class="label">Сторінка ведучого</span>
+  </header>
+  <main id="app" style="display:flex;flex-direction:column;gap:20px"></main>
+</div>
+<div class="toast" id="toast" hidden role="status"></div>
+
+<script>
+/* ===================================================================
+   НАЛАШТУВАННЯ
+   =================================================================== */
+
+// СПИСОК УЧАСНИКІВ (заповніть пізніше).
+// Якщо список порожній, учасники вписують будь-яке ім'я.
+// Якщо заповнений, учасник обирає себе зі списку, а "info" показується йому після входу.
+const ROSTER = [
+  // { name: "Оксана Коваль", info: "5-А" },
+];
+
+// ПИТАННЯ І ВІДПОВІДІ. Учасники бачать лише text і ask; відповіді лишаються тут.
+const QUESTIONS = [
+  {text:"Парні передні кінцівки великого перелітного птаха з довгим дзьобом та ногами, що приносить весну", ask:"Яке слово з назви пісні загадано?", title:"Крила лелеки", artist:"Нікіта Кісельов", accept:["крила лелеки","крила","крило"]},
+  {text:"Звуконаслідування зозулі, яке має кілька поширених значень у мові та житті", ask:"Яке слово з назви пісні загадано?", title:"Ку-ку", artist:"Геля Зозуля", accept:["ку-ку","куку"]},
+  {text:"Популярний нестероїдний протизапальний та знеболювальний лікарський препарат", ask:"Яке слово з назви пісні загадано?", title:"Німесил", artist:"Шугар", accept:["німесил","німесулід","nimesil"]},
+  {text:"Найсвятіше місце у християнському храмі або спеціальна споруда для здійснення релігійних обрядів і жертвоприношень", ask:"Яке слово з назви пісні загадано?", title:"Вівтар", artist:"Нікіта Кісельов", accept:["вівтар","олтар"]},
+  {text:"Числове позначення моделі легендарного широкофюзеляжного реактивного пасажирського літака Boeing", ask:"Яке число з назви пісні загадано?", title:"747", artist:"DOROFEEVA", accept:["747"]},
+  {text:"Пора року між зимою та літом, що символізує пробудження природи й оновлення", ask:"Яке слово з назви пісні загадано?", title:"Дві весни", artist:"Святослав Вакарчук & Jerry Heil", accept:["дві весни","весна","весни"]},
+  {text:"Загальноприйнятий у світі та в Україні символ пам'яті жертв усіх військових і цивільних збройних конфліктів", ask:"Яке слово з назви пісні загадано?", title:"Червоний мак", artist:"Kolibri, Zlata Ko", accept:["червоний мак","мак","маки"]},
+  {text:"Переносні або стаціонарні малогабаритні прилади для освітлення", ask:"Яке слово з назви пісні загадано?", title:"Ліхтарики", artist:"Тоня Матвієнко", accept:["ліхтарики","ліхтарик","ліхтар","ліхтарі"]},
+  {text:"Вид мистецтва, що передає почуття через звуки, ритм і мелодію. У пісні до нього звертаються, як до живої людини", ask:"Яке слово з назви пісні загадано?", title:"Музико", artist:"Alena Omargalieva", accept:["музико","музика"]},
+  {text:"Вигук-звертання до Бога, яким висловлюють сильне здивування, переляк або розпач", ask:"Який вислів із назви пісні загадано?", title:"О, Господи", artist:"Анна Трінчер", accept:["о господи","господи"]}
+];
+
+const HOST_PREFIX = "muzvik-quiz-2026-";   // має збігатися з participant.html
+const TOTAL = QUESTIONS.length;
+
+/* ===================================================================
+   СТАН ГРИ
+   =================================================================== */
+const $ = id => document.getElementById(id);
+let peer = null;
+let G = { code:"", limit:30, phase:"setup", q:-1, endsAt:null };   // setup | lobby | open | closed | reveal | final
+const players = new Map();   // pid -> {pid, name, info, conn, online, answers:{}, away:{}, verdict:{}, joinedAt}
+let peek = false, peekQ = null, resetArmed = false, typedCode = "", setupErr = "";
+
+/* ---------- checking ---------- */
+function norm(s){ return String(s||"").toLowerCase().replace(/ё/g,"е").replace(/[’ʼ'`]/g,"").replace(/[^0-9a-zа-яіїєґ]/g,""); }
+function lev(a,b){ const m=a.length,n=b.length; if(Math.abs(m-n)>2) return 9; let p=Array.from({length:n+1},(_,i)=>i);
+  for(let i=1;i<=m;i++){const c=[i];for(let j=1;j<=n;j++)c[j]=Math.min(p[j]+1,c[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=c;} return p[n]; }
+function autoCheck(text, accept){
+  const t=norm(text); if(!t) return null;
+  for(const raw of accept){ const v=norm(raw); if(!v) continue;
+    if(t===v) return true; if(v.length>=3 && t.includes(v)) return true;
+    const tol=v.length>=9?2:v.length>=5?1:0; if(tol && lev(t,v)<=tol) return true; }
+  return false;
+}
+function verdict(p, q){
+  if(p.verdict[q]===true||p.verdict[q]===false) return {v:p.verdict[q], manual:true};
+  const a=p.answers[q]; if(!a) return {v:null, manual:false};
+  return {v:autoCheck(a, QUESTIONS[q].accept), manual:false};
+}
+function score(p){ let s=0; for(let i=0;i<TOTAL;i++) if(verdict(p,i).v===true) s++; return s; }
+function list(){ return [...players.values()].sort((a,b)=>a.joinedAt-b.joinedAt); }
+function ranking(){
+  const rows=list().map(p=>({pid:p.pid, name:p.name, score:score(p)})).sort((a,b)=>b.score-a.score||a.name.localeCompare(b.name,"uk"));
+  let place=0, prev=null; rows.forEach((r,i)=>{ if(r.score!==prev){ place=i+1; prev=r.score; } r.place=place; });
+  return rows;
+}
+
+/* ---------- helpers ---------- */
+function el(tag, props, ...kids){
+  const e=document.createElement(tag);
+  if(props) for(const [k,v] of Object.entries(props)){
+    if(k==="class") e.className=v; else if(k==="text") e.textContent=v;
+    else if(k.startsWith("on")) e.addEventListener(k.slice(2),v); else if(v!==false&&v!=null) e.setAttribute(k, v===true?"":v);
+  }
+  for(const k of kids) if(k!=null) e.append(k);
+  return e;
+}
+let toastT; function toast(m){ const t=$("toast"); t.textContent=m; t.hidden=false; clearTimeout(toastT); toastT=setTimeout(()=>t.hidden=true,2800); }
+
+/* ---------- save / restore (if the host page is refreshed) ---------- */
+function save(){
+  try{ localStorage.setItem("mv_host", JSON.stringify({G, players:list().map(({conn,online,...p})=>p)})); }catch(e){}
+}
+function loadSaved(){ try{ return JSON.parse(localStorage.getItem("mv_host")||"null"); }catch(e){ return null; } }
+
+/* ===================================================================
+   З'ЄДНАННЯ З УЧАСНИКАМИ
+   =================================================================== */
+function openGame(code, restore){
+  setupErr=""; render();
+  if(typeof Peer==="undefined"){ setupErr="Не завантажилася бібліотека з'єднання. Перевірте інтернет і оновіть сторінку."; render(); return; }
+  if(peer){ try{ peer.destroy(); }catch(e){} }
+  peer = new Peer(HOST_PREFIX + code);
+  peer.on("open", ()=>{
+    if(restore){ G=restore.G; players.clear(); restore.players.forEach(p=>players.set(p.pid,{...p, conn:null, online:false})); }
+    else { G={code, limit:G.limit, phase:"lobby", q:-1, endsAt:null}; players.clear(); }
+    G.code=code; save(); render();
+  });
+  peer.on("connection", c=>{
+    c.on("open", ()=>c.send({type:"hello", roster:ROSTER.map(r=>r.name), phase:G.phase}));
+    c.on("data", d=>onMessage(c,d));
+    c.on("close", ()=>{ for(const p of players.values()) if(p.conn===c){ p.online=false; p.conn=null; } render(); });
+  });
+  peer.on("disconnected", ()=>{ try{ peer.reconnect(); }catch(e){} });
+  peer.on("error", e=>{
+    if(e.type==="unavailable-id"){ setupErr="Код "+code+" уже зайнятий іншою грою. Оберіть інший код."; G.phase="setup"; render(); }
+    else if(e.type==="network"||e.type==="server-error"||e.type==="socket-error"){ toast("Проблема зі зв'язком. Перевірте інтернет."); if(G.phase==="setup"){ setupErr="Немає зв'язку з сервером. Перевірте інтернет."; render(); } }
+  });
+}
+
+function onMessage(c, d){
+  if(!d||typeof d!=="object") return;
+  if(d.type==="join"){
+    const pid=String(d.pid||"").slice(0,20); let name=String(d.name||"").trim().replace(/\s+/g," ").slice(0,40);
+    if(!pid||!name) return c.send({type:"join_err", msg:"Введіть ім'я."});
+    let info="";
+    if(ROSTER.length){
+      const hit=ROSTER.find(r=>norm(r.name)===norm(name));
+      if(!hit) return c.send({type:"join_err", msg:"Такого імені немає у списку. Почніть писати й оберіть себе з підказок."});
+      name=hit.name; info=hit.info||"";
+    }
+    const clash=[...players.values()].find(p=>p.pid!==pid && norm(p.name)===norm(name));
+    if(clash) return c.send({type:"join_err", msg: clash.online ? "Це ім'я вже використовує інший учасник." : "Це ім'я вже в грі. Попросіть ведучого прибрати старий запис."});
+    let p=players.get(pid);
+    if(!p){ p={pid, name, info, answers:{}, away:{}, verdict:{}, joinedAt:Date.now()}; players.set(pid,p); }
+    p.name=name; p.info=info; p.conn=c; p.online=true;
+    c.send({type:"joined", name, info});
+    sendState(p); save(); render();
+    return;
+  }
+  const p=[...players.values()].find(x=>x.conn===c); if(!p) return;
+  if(d.type==="answer"){
+    if(G.phase!=="open"||d.q!==G.q) return sendState(p);
+    if(G.endsAt && Date.now()>G.endsAt+1500) return sendState(p);
+    const t=String(d.text||"").trim().slice(0,60); if(!t) return;
+    p.answers[G.q]=t; sendState(p); save(); render();
+  } else if(d.type==="away"){
+    if(G.phase!=="open"||d.q!==G.q) return;
+    p.away[G.q]=(p.away[G.q]||0)+1; save(); render();
+  }
+}
+
+function sendState(p){
+  if(!p.conn||!p.online) return;
+  const q=G.q, Q=QUESTIONS[q];
+  const msg={type:"state", phase:G.phase, q, total:TOTAL, limit:G.limit,
+    question: (q>=0&&Q&&G.phase!=="lobby") ? {text:Q.text, ask:Q.ask} : null,
+    remainingMs: (G.phase==="open"&&G.endsAt) ? G.endsAt-Date.now() : null,
+    myAnswer: q>=0 ? (p.answers[q]||"") : ""};
+  if(G.phase==="reveal") msg.reveal={title:Q.title, artist:Q.artist, correct:verdict(p,q).v};
+  if(G.phase==="final"){ const r=ranking(); msg.podium=r.filter(x=>x.place<=3).map(x=>({name:x.name,score:x.score,place:x.place})); const me=r.find(x=>x.pid===p.pid); if(me){ msg.myPlace=me.place; msg.myScore=me.score; } }
+  try{ p.conn.send(msg); }catch(e){}
+}
+function broadcast(){ for(const p of players.values()) sendState(p); save(); render(); }
+
+/* ---------- host actions ---------- */
+function goTo(q){ G.q=q; G.phase="open"; G.endsAt=G.limit?Date.now()+G.limit*1000:null; peek=false; broadcast(); }
+function closeQ(){ G.phase="closed"; G.endsAt=null; broadcast(); }
+function reveal(){ G.phase="reveal"; G.endsAt=null; broadcast(); }
+function finish(){ G.phase="final"; G.endsAt=null; broadcast(); }
+function mark(p,q,v){ p.verdict[q]=v; if(G.phase==="reveal"&&q===G.q) sendState(p); save(); render(); }
+function kick(p){ try{ p.conn&&p.conn.send({type:"join_err", msg:"Ведучий прибрав вас із гри. Введіть ім'я ще раз."}); }catch(e){} players.delete(p.pid); save(); render(); }
+function endSession(){
+  for(const p of players.values()){ try{ p.conn&&p.conn.close(); }catch(e){} }
+  try{ peer&&peer.destroy(); }catch(e){}
+  peer=null; players.clear(); G={code:"", limit:G.limit, phase:"setup", q:-1, endsAt:null};
+  try{ localStorage.removeItem("mv_host"); }catch(e){}
+  typedCode=""; render();
+}
+
+setInterval(()=>{
+  if(G.phase==="open" && G.endsAt && Date.now()>G.endsAt+1000) closeQ();
+  paintTimer();
+}, 500);
+
+/* ===================================================================
+   ЕКРАНИ ВЕДУЧОГО
+   =================================================================== */
+function render(){
+  const app=$("app"); app.replaceChildren();
+  if(G.phase==="setup") app.append(setupView());
+  else if(G.phase==="lobby") app.append(lobbyView());
+  else {
+    if(G.phase==="final") app.append(finalView());
+    app.append(controls(), el("div",{class:"grid"}, questionView(), scoreView()), endView());
+  }
+  paintTimer();
+}
+
+function limitPicker(){
+  const s=el("select",{"aria-label":"Час на відповідь"});
+  for(const [v,t] of [[20,"20 секунд"],[30,"30 секунд"],[45,"45 секунд"],[60,"60 секунд"],[0,"без таймера"]]){ const o=el("option",{value:String(v),text:t}); if(v===G.limit) o.selected=true; s.append(o); }
+  s.onchange=()=>{ G.limit=Number(s.value); save(); };
+  return el("label",{class:"row"}, el("span",{class:"muted",text:"Час на відповідь:"}), s);
+}
+function rosterNote(){
+  return el("p",{class:"note",text: ROSTER.length ? "Список учасників: "+ROSTER.length+" імен. Учасники обирають себе зі списку." : "Список учасників порожній, тому учасники вписують ім'я самі."});
+}
+
+function setupView(){
+  const inp=el("input",{class:"code",inputmode:"numeric",maxlength:"6",autocomplete:"off",placeholder:"Код","aria-label":"Код гри"});
+  inp.value=typedCode; inp.oninput=()=>{ typedCode=inp.value.replace(/\D/g,""); };
+  const go=()=>{ const c=inp.value.replace(/\D/g,""); if(c.length<4||c.length>6){ setupErr="Код має бути з 4–6 цифр."; render(); return; } typedCode=c; openGame(c); };
+  inp.onkeydown=e=>{ if(e.key==="Enter") go(); };
+  const saved=loadSaved();
+  const panel=el("div",{class:"panel center",style:"max-width:640px;margin:0 auto;width:100%;padding:36px 22px"},
+    el("h2",{style:"font-size:34px",text:"Введіть код гри"}),
+    el("p",{class:"muted",text:"Придумайте код з 4–6 цифр. Учасники введуть його на своїй сторінці."}),
+    inp, el("p",{class:"err",text:setupErr,"aria-live":"polite"}),
+    limitPicker(),
+    el("button",{class:"primary big",type:"button",style:"width:100%",text:"Відкрити гру",onclick:go}),
+    rosterNote());
+  if(saved && saved.G && saved.G.code && saved.G.phase!=="setup"){
+    panel.append(el("button",{type:"button",style:"width:100%",text:"Продовжити попередню гру (код "+saved.G.code+")",onclick:()=>openGame(saved.G.code, saved)}));
+  }
+  setTimeout(()=>inp.focus(),0);
+  return panel;
+}
+
+function lobbyView(){
+  const ps=list();
+  const chips=el("div",{class:"chips"});
+  for(const p of ps) chips.append(el("span",{class:"chip"+(p.online?"":" off")}, el("span",{text:p.name+(p.info?" · "+p.info:"")}),
+    el("button",{type:"button",title:"Прибрати","aria-label":"Прибрати: "+p.name,text:"×",onclick:()=>kick(p)})));
+  return el("div",{class:"lobby"},
+    el("div",{class:"codebox"}, el("span",{class:"label",text:"Код гри"}), el("span",{class:"code",text:G.code}), el("span",{text:"Відкрийте сторінку учасника і введіть цей код"})),
+    el("div",{class:"panel"},
+      el("div",{class:"row"},
+        el("div",null, el("span",{class:"label",text:"Зареєструвалися"}), el("div",{class:"count",text:String(ps.length)})),
+        el("span",{class:"spacer"}),
+        el("button",{class:"primary big",type:"button",text:"Почати гру",disabled:!ps.length,onclick:()=>goTo(0)})),
+      ps.length?chips:el("p",{class:"muted",text:"Поки нікого. Імена з'являтимуться тут, щойно учасники введуть код і ім'я."}),
+      limitPicker(), rosterNote(),
+      el("p",{class:"note",text:"Хрестик прибирає учасника (наприклад, дубль). Не закривайте цю сторінку під час гри: учасники з'єднані саме з нею."})));
+}
+
+function controls(){
+  const q=G.q, fin=G.phase==="final";
+  const c=el("div",{class:"controls"},
+    el("span",{class:"pill sun",text:"Код "+G.code}),
+    el("button",{type:"button",text:"← Назад",disabled:q<=0,onclick:()=>goTo(q-1)}),
+    el("button",{class:"primary",type:"button",text:q>=TOTAL-1?"Останнє питання":"Наступне питання →",disabled:q>=TOTAL-1,onclick:()=>goTo(q+1)}),
+    el("span",{class:"spacer"}));
+  if(G.phase==="open") c.append(el("button",{type:"button",text:"Закрити прийом",onclick:closeQ}));
+  else c.append(el("button",{type:"button",text:"Відкрити ще раз",disabled:fin,onclick:()=>goTo(q)}));
+  c.append(el("button",{type:"button",text:"Показати відповідь",disabled:fin||G.phase==="reveal",onclick:reveal}),
+    fin ? el("button",{type:"button",text:"Повернутися до питань",onclick:closeQ}) : el("button",{class:"primary",type:"button",text:"Завершити гру",onclick:finish}));
+  return c;
+}
+
+function questionView(){
+  const q=G.q, Q=QUESTIONS[q];
+  const phaseTxt={open:"приймаємо відповіді",closed:"прийом закрито",reveal:"відповідь показано",final:"гру завершено"}[G.phase]||"";
+  const panel=el("div",{class:"panel"},
+    el("div",{class:"qhead"}, el("span",{class:"label",text:"Питання "+(q+1)+" з "+TOTAL}), el("span",{class:"pill "+(G.phase==="open"?"sun":"wait"),text:phaseTxt})),
+    el("div",{class:"timerrow",id:"timerRow"}, el("div",{class:"timer",id:"timer"}, el("i")), el("span",{class:"secs",id:"secs"})),
+    el("p",{class:"qtext",text:Q.text}));
+  if(peekQ!==q){ peek=false; peekQ=q; }
+  const det=el("details",{class:"key"}, el("summary",{text:"Правильна відповідь (натисніть, щоб побачити)"}), el("b",{text:Q.title}), el("span",{class:"muted",text:Q.artist}));
+  det.open = peek || G.phase==="reveal" || G.phase==="final";
+  det.addEventListener("toggle", ()=>{ peek=det.open; });
+  panel.append(det);
+  const ps=list(); let ans=0, good=0, bad=0;
+  const ul=el("ul",{class:"alist"});
+  for(const p of ps){
+    const t=p.answers[q]; if(t) ans++;
+    const r=verdict(p,q); if(r.v===true) good++; else if(r.v===false) bad++;
+    ul.append(el("li",null,
+      el("span",{class:"who",text:p.name}),
+      el("div",{class:"acts"},
+        r.v===null ? el("span",{class:"pill wait",text:"—"}) : el("span",{class:"pill "+(r.v?"good":"bad"),text:r.v?"✓ правильно":"✗ неправильно"}),
+        el("button",{type:"button",class:r.manual&&r.v===true?"on-good":"",title:"Зарахувати","aria-label":"Зарахувати: "+p.name,text:"✓",onclick:()=>mark(p,q,true)}),
+        el("button",{type:"button",class:r.manual&&r.v===false?"on-bad":"",title:"Не зараховувати","aria-label":"Не зараховувати: "+p.name,text:"✗",onclick:()=>mark(p,q,false)})),
+      el("span",{class:"txt"+(t?"":" none"),text:t||"немає відповіді"}),
+      el("div",{class:"row"},
+        r.v!==null ? el("span",{class:"note",text:r.manual?"оцінено вручну":"автоперевірка"}) : null,
+        p.away[q] ? el("span",{class:"pill warn",text:"⚠ виходив зі сторінки: "+p.away[q]+"×"}) : null,
+        p.online ? null : el("span",{class:"pill off",text:"не в мережі"}))));
+  }
+  panel.append(el("div",{class:"row"},
+    el("span",{class:"pill wait",text:"Відповіли: "+ans+" з "+ps.length}), el("span",{class:"pill good",text:"✓ "+good}), el("span",{class:"pill bad",text:"✗ "+bad})),
+    ps.length?ul:el("p",{class:"muted",text:"У грі немає учасників."}));
+  return panel;
+}
+
+function scoreView(){
+  const rows=ranking();
+  const t=el("table"), head=el("tr",null, el("th",{class:"name",text:"Учасник"}));
+  for(let i=0;i<TOTAL;i++) head.append(el("th",{class:i===G.q?"cur":"",text:String(i+1)}));
+  head.append(el("th",{text:"Бали"})); t.append(el("thead",null,head));
+  const tb=el("tbody");
+  for(const r of rows){
+    const p=players.get(r.pid), tr=el("tr",null, el("td",{class:"name",text:r.place+". "+r.name}));
+    for(let i=0;i<TOTAL;i++){ const v=verdict(p,i).v; tr.append(el("td",{class:v===true?"c-good":v===false?"c-bad":"c-none",text:v===true?"✓":v===false?"✗":"·"})); }
+    tr.append(el("td",{class:"total",text:String(r.score)})); tb.append(tr);
+  }
+  t.append(tb);
+  return el("div",{class:"panel"}, el("h2",{text:"Рахунок"}), el("div",{class:"tablebox"},t),
+    el("p",{class:"note",text:"✓ правильно, ✗ неправильно, · немає відповіді. Оцінку можна змінити кнопками ✓ / ✗ біля відповіді."}));
+}
+
+function finalView(){
+  const top=ranking().filter(r=>r.place<=3);
+  const pod=el("div",{class:"podium"});
+  for(const n of [2,1,3]){
+    const who=top.filter(r=>r.place===n);
+    const names=el("div",{class:"names"}); who.forEach(r=>names.append(el("span",{text:r.name})));
+    pod.append(el("div",{class:"step p"+n+(who.length?"":" empty")}, names,
+      el("span",{class:"pts",text:who.length?who[0].score+" з "+TOTAL:"—"}), el("div",{class:"block","aria-label":n+" місце",text:String(n)})));
+  }
+  return el("div",{class:"panel center"}, el("span",{class:"label",text:"Гру завершено"}), el("h2",{style:"font-size:40px",text:"Переможці"}), pod);
+}
+
+function endView(){
+  const btn=el("button",{class:"danger",type:"button",text:resetArmed?"Так, закрити гру":"Нова гра"});
+  btn.onclick=()=>{ if(!resetArmed){ resetArmed=true; render(); setTimeout(()=>{ resetArmed=false; render(); },5000); return; } resetArmed=false; endSession(); };
+  return el("div",{class:"panel"}, el("div",{class:"row"}, btn,
+    el("span",{class:"note",text:resetArmed?"Натисніть ще раз, щоб підтвердити. Усі відповіді буде стерто.":"Закриває цю гру. Потім введете новий код."})));
+}
+
+function paintTimer(){
+  const row=$("timerRow"); if(!row) return;
+  const on=G.phase==="open" && G.endsAt && G.limit; row.hidden=!on; if(!on) return;
+  const ms=Math.max(0,G.endsAt-Date.now()), s=Math.ceil(ms/1000);
+  $("timer").firstElementChild.style.width=Math.min(100,ms/(G.limit*1000)*100)+"%";
+  $("timer").classList.toggle("low", s<=5);
+  $("secs").textContent=s+" с";
+}
+
+window.addEventListener("beforeunload", e=>{ if(G.phase!=="setup"){ e.preventDefault(); e.returnValue=""; } });
+render();
+</script>
+</body>
+</html>

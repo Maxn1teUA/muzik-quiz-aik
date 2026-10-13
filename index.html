@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Музична вікторина — учасник</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito+Sans:wght@400;600;700;800&display=swap">
+<!-- PeerJS: пряме з'єднання з комп'ютером ведучого за кодом гри -->
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<style>
+:root{
+  color-scheme:dark;
+  --stage:#1B1446; --panel:#251C5C; --line:#3B3180;
+  --paper:#FBF7EE; --haze:#BDB5EA; --flame:#FF7A3D; --sun:#F2C14E;
+  --good:#52C98E; --bad:#FF6B78;
+  --display:'Fredoka','Trebuchet MS',Arial,sans-serif;
+  --body:'Nunito Sans','Segoe UI',Arial,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{background:var(--stage);color:var(--paper);font:17px/1.5 var(--body);padding:max(20px,env(safe-area-inset-top)) 16px max(40px,env(safe-area-inset-bottom))}
+.wrap{max-width:600px;margin:0 auto;display:flex;flex-direction:column;gap:18px}
+h1,h2{font-family:var(--display);font-weight:600;line-height:1.1;margin:0;text-wrap:balance}
+p{margin:0}
+.brand{font-family:var(--display);font-size:24px;font-weight:600}
+.brand span{color:var(--flame)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:22px;padding:28px 22px;display:flex;flex-direction:column;gap:16px}
+.center{text-align:center;align-items:center}
+.label{font-size:13px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--sun)}
+.muted{color:var(--haze)}
+.err{color:var(--bad);font-weight:700;min-height:24px}
+input{font:inherit;width:100%;background:var(--stage);color:var(--paper);border:2px solid var(--line);border-radius:14px;padding:14px 16px;font-size:20px;min-height:56px}
+input:disabled{opacity:.6}
+input.code{font-family:var(--display);font-size:42px;letter-spacing:.25em;text-align:center}
+button{font:inherit;cursor:pointer;border-radius:14px;padding:14px 18px;font-weight:800;font-size:19px;min-height:56px;width:100%;border:1px solid var(--flame);background:var(--flame);color:var(--stage)}
+button.ghost{background:transparent;border-color:var(--line);color:var(--paper);font-size:16px;min-height:44px}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible,input:focus-visible{outline:3px solid var(--sun);outline-offset:2px}
+.hello{font-family:var(--display);font-size:36px;color:var(--flame);overflow-wrap:anywhere}
+.dots{display:flex;gap:6px;justify-content:center}
+.dots i{width:10px;height:10px;border-radius:50%;background:var(--sun);animation:pulse 1.2s infinite ease-in-out}
+.dots i:nth-child(2){animation-delay:.2s}.dots i:nth-child(3){animation-delay:.4s}
+@keyframes pulse{0%,100%{opacity:.25}50%{opacity:1}}
+.qhead{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.qnum{font-family:var(--display);font-size:60px;font-weight:700;line-height:.9;color:var(--line)}
+.qtext{font-size:24px;line-height:1.35;font-weight:600}
+.timerrow{display:flex;align-items:center;gap:10px}
+.timer{flex:1;height:10px;border-radius:999px;background:var(--stage);overflow:hidden}
+.timer i{display:block;height:100%;background:var(--sun);transition:width .5s linear}
+.timer.low i{background:var(--flame)}
+.secs{font-family:var(--display);font-size:22px;color:var(--sun);font-variant-numeric:tabular-nums;min-width:52px;text-align:right}
+.status{color:var(--haze);min-height:24px}
+.note{font-size:14px;color:var(--haze)}
+.reveal{border-top:1px dashed var(--line);padding-top:16px;display:flex;flex-direction:column;gap:6px}
+.reveal .ans{font-family:var(--display);font-size:34px;font-weight:600;color:var(--flame)}
+.verdict{font-family:var(--display);font-size:30px;font-weight:700}
+.verdict.good{color:var(--good)} .verdict.bad{color:var(--bad)}
+.podium{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;align-items:end;width:100%}
+.step{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0}
+.step .names{display:flex;flex-direction:column;gap:2px;text-align:center;font-weight:800;overflow-wrap:anywhere;min-height:24px}
+.step .names .me{color:var(--flame)}
+.step .pts{color:var(--haze);font-size:14px}
+.step .block{width:100%;border-radius:14px 14px 4px 4px;display:flex;justify-content:center;padding-top:10px;font-family:var(--display);font-weight:700;color:var(--stage)}
+.p1 .block{height:140px;background:var(--sun);font-size:54px}
+.p2 .block{height:104px;background:var(--paper);font-size:42px}
+.p3 .block{height:76px;background:var(--flame);font-size:36px}
+.empty .block{opacity:.25}
+.banner{background:var(--bad);color:var(--stage);font-weight:800;border-radius:12px;padding:10px 14px;text-align:center}
+[hidden]{display:none!important}
+@media (prefers-reduced-motion:reduce){.dots i{animation:none;opacity:.8}.timer i{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">Музична <span>вікторина</span></div>
+  <div class="banner" id="lostBanner" hidden>Зв'язок з ведучим втрачено. Підключаємося знову…</div>
+
+  <!-- 1. Код -->
+  <form class="card center" id="sCode">
+    <span class="label">Крок 1 з 2</span>
+    <h2>Введіть код гри</h2>
+    <p class="muted">Код показаний на екрані ведучого.</p>
+    <input class="code" id="codeIn" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="Код" aria-label="Код гри">
+    <p class="err" id="codeErr" aria-live="polite"></p>
+    <button type="submit" id="codeBtn">Далі</button>
+  </form>
+
+  <!-- 2. Ім'я -->
+  <form class="card center" id="sName" hidden>
+    <span class="label">Крок 2 з 2</span>
+    <h2>Ваше ім'я</h2>
+    <p class="muted" id="nameHint">Напишіть своє ім'я.</p>
+    <input id="nameIn" maxlength="40" autocomplete="off" list="roster" placeholder="Ваше ім'я" aria-label="Ім'я">
+    <datalist id="roster"></datalist>
+    <p class="err" id="nameErr" aria-live="polite"></p>
+    <button type="submit" id="nameBtn">Увійти в гру</button>
+    <button type="button" class="ghost" id="backBtn">Змінити код</button>
+  </form>
+
+  <!-- 3. Очікування -->
+  <div class="card center" id="sWait" hidden>
+    <span class="label">Ви в грі</span>
+    <p class="hello" id="helloName"></p>
+    <p class="muted" id="helloInfo" hidden></p>
+    <h2>Очікуйте початок</h2>
+    <div class="dots" aria-hidden="true"><i></i><i></i><i></i></div>
+    <p class="muted">Питання з'явиться тут, щойно ведучий почне гру.</p>
+  </div>
+
+  <!-- 4. Питання -->
+  <form class="card" id="sQuestion" hidden>
+    <div class="qhead"><span class="label" id="qLabel"></span><span class="qnum" id="qNum" aria-hidden="true"></span></div>
+    <div class="timerrow" id="timerRow"><div class="timer" id="timer"><i></i></div><span class="secs" id="secs"></span></div>
+    <p class="qtext" id="qText"></p>
+    <p class="muted" id="qAsk"></p>
+    <input id="ansIn" maxlength="60" autocomplete="off" placeholder="Ваша відповідь" aria-label="Ваша відповідь">
+    <button type="submit" id="ansBtn">Відповісти</button>
+    <p class="status" id="ansStatus" aria-live="polite"></p>
+    <p class="note" id="ruleNote">Не виходьте зі сторінки, поки триває питання. Ведучий бачить, якщо ви перемкнулися на інший застосунок чи асистента.</p>
+    <div class="reveal" id="revealBox" hidden>
+      <span class="label">Правильна відповідь</span>
+      <span class="ans" id="rTitle"></span>
+      <span class="muted" id="rArtist"></span>
+      <span class="verdict" id="rVerdict"></span>
+    </div>
+  </form>
+
+  <!-- 5. Переможці -->
+  <div class="card center" id="sFinal" hidden>
+    <span class="label">Гру завершено</span>
+    <h2>Переможці</h2>
+    <div id="podium" style="width:100%"></div>
+    <p class="hello" id="myPlace" style="font-size:24px"></p>
+  </div>
+</div>
+
+<script>
+const HOST_PREFIX = "muzvik-quiz-2026-";   // має збігатися з host.html
+const $ = id => document.getElementById(id);
+const SCREENS = ["sCode","sName","sWait","sQuestion","sFinal"];
+function show(id){ SCREENS.forEach(s => $(s).hidden = s !== id); }
+
+let peer = null, conn = null, code = "", myName = "", joined = false, st = null, endAt = null;
+let connectTimer = null, retryTimer = null, lastQ = null, awayLock = false;
+const pid = (()=>{ try{ let p = localStorage.getItem("mv_pid"); if(!p){ p = Math.random().toString(36).slice(2,12); localStorage.setItem("mv_pid", p); } return p; }catch(e){ return Math.random().toString(36).slice(2,12); } })();
+
+/* ---------- connection ---------- */
+function makePeer(){
+  return new Promise((resolve, reject) => {
+    if(peer && peer.open && !peer.destroyed) return resolve(peer);
+    if(peer){ try{ peer.destroy(); }catch(e){} }
+    peer = new Peer();
+    peer.on("open", () => resolve(peer));
+    peer.on("disconnected", () => { try{ peer.reconnect(); }catch(e){} });
+    peer.on("error", e => {
+      if(e.type === "peer-unavailable") return onNoHost();
+      if(!peer.open) reject(e);
+    });
+  });
+}
+async function connect(){
+  clearTimeout(connectTimer);
+  try{ await makePeer(); }catch(e){ return onFail("Немає інтернету або з'єднання заблоковане. Перевірте мережу й спробуйте ще раз."); }
+  if(conn){ try{ conn.close(); }catch(e){} }
+  conn = peer.connect(HOST_PREFIX + code, {reliable:true});
+  connectTimer = setTimeout(() => { if(!conn || !conn.open) onNoHost(); }, 9000);
+  conn.on("open", () => {
+    clearTimeout(connectTimer); clearTimeout(retryTimer);
+    $("lostBanner").hidden = true;
+    if(joined) send({type:"join", pid, name:myName});
+  });
+  conn.on("data", onMessage);
+  conn.on("close", onLost);
+  conn.on("error", onLost);
+}
+function send(msg){ if(conn && conn.open){ try{ conn.send(msg); return true; }catch(e){} } return false; }
+function onNoHost(){
+  clearTimeout(connectTimer);
+  if(joined){ onLost(); return; }
+  onFail("Гри з таким кодом немає. Перевірте код на екрані ведучого.");
+}
+function onFail(msg){ $("codeErr").textContent = msg; $("codeBtn").disabled = false; $("codeBtn").textContent = "Далі"; show("sCode"); }
+function onLost(){
+  if(!joined) return;
+  $("lostBanner").hidden = false;
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(connect, 3000);
+}
+
+/* ---------- messages from host ---------- */
+function onMessage(m){
+  if(!m || typeof m !== "object") return;
+  if(m.type === "hello"){
+    const names = Array.isArray(m.roster) ? m.roster : [];
+    $("roster").replaceChildren(...names.map(n => { const o = document.createElement("option"); o.value = n; return o; }));
+    $("nameHint").textContent = names.length ? "Почніть писати ім'я та оберіть себе зі списку." : "Напишіть своє ім'я. Його побачить ведучий.";
+    if(!joined){ $("codeBtn").disabled = false; $("codeBtn").textContent = "Далі"; show("sName"); setTimeout(()=>$("nameIn").focus(), 50); }
+  }
+  else if(m.type === "join_err"){
+    if(joined){ joined = false; st = null; $("lostBanner").hidden = true; show("sName"); }
+    $("nameErr").textContent = m.msg || "Не вдалося увійти."; $("nameBtn").disabled = false;
+  }
+  else if(m.type === "joined"){
+    joined = true; myName = m.name;
+    $("helloName").textContent = m.name;
+    $("helloInfo").textContent = m.info || ""; $("helloInfo").hidden = !m.info;
+    $("nameBtn").disabled = false;
+  }
+  else if(m.type === "state"){ st = m; endAt = (m.remainingMs != null) ? Date.now() + m.remainingMs : null; render(); }
+}
+
+/* ---------- screens ---------- */
+function render(){
+  if(!joined || !st) return;
+  if(st.phase === "final"){ renderFinal(); show("sFinal"); return; }
+  if(st.phase === "lobby" || st.q == null || st.q < 0 || !st.question){ show("sWait"); return; }
+  show("sQuestion");
+  const n = st.q + 1;
+  $("qLabel").textContent = "Питання " + n + " з " + st.total;
+  $("qNum").textContent = String(n).padStart(2,"0");
+  $("qText").textContent = st.question.text;
+  $("qAsk").textContent = st.question.ask;
+  if(lastQ !== st.q){ $("ansIn").value = st.myAnswer || ""; lastQ = st.q; }
+  const open = isOpen();
+  $("ansIn").disabled = !open; $("ansBtn").disabled = !open;
+  $("ansBtn").textContent = st.myAnswer ? "Змінити відповідь" : "Відповісти";
+  $("ansStatus").textContent = open
+    ? (st.myAnswer ? "Відповідь прийнято: «" + st.myAnswer + "». Можна змінити, поки не скінчився час." : "Напишіть відповідь і натисніть «Відповісти».")
+    : (st.myAnswer ? "Прийом закрито. Ваша відповідь: «" + st.myAnswer + "»." : "Прийом відповідей закрито.");
+  $("ruleNote").hidden = !open;
+  const r = st.phase === "reveal" ? st.reveal : null;
+  $("revealBox").hidden = !r;
+  if(r){
+    $("rTitle").textContent = r.title; $("rArtist").textContent = r.artist;
+    $("rVerdict").textContent = r.correct === true ? "Правильно! +1 бал" : r.correct === false ? "Неправильно" : "Ви не відповіли";
+    $("rVerdict").className = "verdict " + (r.correct === true ? "good" : "bad");
+  }
+  paintTimer();
+}
+function isOpen(){ return st && st.phase === "open" && (endAt == null || Date.now() < endAt + 500); }
+function paintTimer(){
+  const show_ = st && st.phase === "open" && endAt != null && st.limit;
+  $("timerRow").hidden = !show_;
+  if(!show_) return;
+  const ms = Math.max(0, endAt - Date.now()), s = Math.ceil(ms/1000);
+  $("timer").firstElementChild.style.width = Math.min(100, ms/(st.limit*1000)*100) + "%";
+  $("timer").classList.toggle("low", s <= 5);
+  $("secs").textContent = s + " с";
+}
+function renderFinal(){
+  const rows = st.podium || [];
+  const wrap = document.createElement("div"); wrap.className = "podium";
+  for(const p of [2,1,3]){
+    const who = rows.filter(r => r.place === p);
+    const step = document.createElement("div"); step.className = "step p" + p + (who.length ? "" : " empty");
+    const names = document.createElement("div"); names.className = "names";
+    who.forEach(r => { const s = document.createElement("span"); s.textContent = r.name; if(r.name === myName) s.className = "me"; names.append(s); });
+    const pts = document.createElement("span"); pts.className = "pts"; pts.textContent = who.length ? who[0].score + " з " + st.total : "—";
+    const block = document.createElement("div"); block.className = "block"; block.textContent = p; block.setAttribute("aria-label", p + " місце");
+    step.append(names, pts, block); wrap.append(step);
+  }
+  $("podium").replaceChildren(wrap);
+  $("myPlace").textContent = st.myPlace ? "Ваше місце: " + st.myPlace + " (" + st.myScore + " з " + st.total + ")" : "";
+}
+setInterval(() => {
+  if(!st || $("sQuestion").hidden) return;
+  paintTimer();
+  if($("ansIn").disabled === isOpen()) render();
+}, 500);
+
+/* ---------- actions ---------- */
+$("sCode").addEventListener("submit", e => {
+  e.preventDefault();
+  const v = $("codeIn").value.replace(/\D/g, "");
+  if(v.length < 4){ $("codeErr").textContent = "Введіть код з екрана ведучого."; return; }
+  code = v; $("codeErr").textContent = "";
+  $("codeBtn").disabled = true; $("codeBtn").textContent = "Підключаємося…";
+  connect();
+});
+$("backBtn").onclick = () => { try{ conn && conn.close(); }catch(e){} conn = null; show("sCode"); };
+$("sName").addEventListener("submit", e => {
+  e.preventDefault();
+  const name = $("nameIn").value.trim().replace(/\s+/g, " ");
+  if(!name){ $("nameErr").textContent = "Введіть ім'я."; return; }
+  $("nameErr").textContent = ""; $("nameBtn").disabled = true;
+  myName = name;
+  if(!send({type:"join", pid, name})){ $("nameErr").textContent = "Немає зв'язку з ведучим. Спробуйте ще раз."; $("nameBtn").disabled = false; }
+});
+$("sQuestion").addEventListener("submit", e => {
+  e.preventDefault();
+  if(!isOpen()) return;
+  const text = $("ansIn").value.trim();
+  if(!text){ $("ansIn").focus(); return; }
+  if(send({type:"answer", q:st.q, text})) $("ansStatus").textContent = "Надсилаємо…";
+  else $("ansStatus").textContent = "Немає зв'язку з ведучим. Відповідь не надіслано.";
+});
+
+/* ---------- leaving the page during a question ---------- */
+function away(){
+  if(!joined || !isOpen() || awayLock) return;
+  awayLock = true; setTimeout(() => awayLock = false, 3000);
+  send({type:"away", q:st.q});
+}
+document.addEventListener("visibilitychange", () => { if(document.visibilityState === "hidden") away(); });
+window.addEventListener("blur", away);
+
+if(typeof Peer === "undefined") onFail("Не завантажилася бібліотека з'єднання. Перевірте інтернет і оновіть сторінку.");
+</script>
+</body>
+</html>
