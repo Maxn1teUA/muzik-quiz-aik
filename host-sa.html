@@ -6,7 +6,7 @@
 <title>Музична вікторина — ведучий</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Nunito+Sans:wght@400;600;700;800&display=swap">
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
 <style>
 :root{
   color-scheme:dark;
@@ -47,6 +47,8 @@ select{background:var(--stage);color:var(--paper);border:1px solid var(--line);b
 .pill.good{background:var(--good-bg);color:var(--good)} .pill.bad{background:var(--bad-bg);color:var(--bad)}
 .pill.wait{background:var(--line);color:var(--haze)} .pill.sun{background:var(--sun);color:var(--stage)}
 .pill.warn{background:var(--sun);color:var(--stage);font-size:12px;padding:2px 10px}
+.typing{color:var(--sun);font-style:italic;font-size:17px;overflow-wrap:anywhere}
+.typing::before{content:"✎ пише: ";font-style:normal;font-weight:800}
 .pill.off{background:transparent;border:1px solid var(--line);color:var(--haze);font-size:12px;padding:2px 10px}
 
 /* lobby */
@@ -145,17 +147,20 @@ const QUESTIONS = [
   {text:"Вигук-звертання до Бога, яким висловлюють сильне здивування, переляк або розпач", ask:"Який вислів із назви пісні загадано?", title:"О, Господи", artist:"Анна Трінчер", accept:["о господи","господи"]}
 ];
 
-const HOST_PREFIX = "muzvik-quiz-2026-";   // має збігатися з participant.html
+// Сервер-посередник. Має бути ОДНАКОВИЙ у host.html та index.html.
+const BROKER = "wss://broker.emqx.io:8084/mqtt";
+const TOPIC  = "muzvik-quiz-2026/";
 const TOTAL = QUESTIONS.length;
 
 /* ===================================================================
    СТАН ГРИ
    =================================================================== */
 const $ = id => document.getElementById(id);
-let peer = null;
-let G = { code:"", limit:30, phase:"setup", q:-1, endsAt:null };   // setup | lobby | open | closed | reveal | final
-const players = new Map();   // pid -> {pid, name, info, conn, online, answers:{}, away:{}, verdict:{}, joinedAt}
-let peek = false, peekQ = null, resetArmed = false, typedCode = "", setupErr = "";
+let client = null, connected = false;
+let G = { code:"", gid:"", limit:30, phase:"setup", q:-1, endsAt:null };   // setup | lobby | open | closed | reveal | final
+const players = new Map();   // pid -> {pid, name, info, answers:{}, away:{}, verdict:{}, drafts:{}, joinedAt, seen}
+let peek = false, peekQ = null, resetArmed = false, typedCode = "", setupErr = "", checking = false;
+const token = (()=>{ try{ let t=localStorage.getItem("mv_host_token"); if(!t){ t="h"+Math.random().toString(36).slice(2,12); localStorage.setItem("mv_host_token",t); } return t; }catch(e){ return "h"+Math.random().toString(36).slice(2,12); } })();
 
 /* ---------- checking ---------- */
 function norm(s){ return String(s||"").toLowerCase().replace(/ё/g,"е").replace(/[’ʼ'`]/g,"").replace(/[^0-9a-zа-яіїєґ]/g,""); }
@@ -195,97 +200,134 @@ let toastT; function toast(m){ const t=$("toast"); t.textContent=m; t.hidden=fal
 
 /* ---------- save / restore (if the host page is refreshed) ---------- */
 function save(){
-  try{ localStorage.setItem("mv_host", JSON.stringify({G, players:list().map(({conn,online,...p})=>p)})); }catch(e){}
+  try{ localStorage.setItem("mv_host", JSON.stringify({G, players:list().map(({drafts,...p})=>p)})); }catch(e){}
 }
 function loadSaved(){ try{ return JSON.parse(localStorage.getItem("mv_host")||"null"); }catch(e){ return null; } }
 
 /* ===================================================================
-   З'ЄДНАННЯ З УЧАСНИКАМИ
+   З'ЄДНАННЯ (сервер-посередник MQTT)
    =================================================================== */
-function openGame(code, restore){
-  setupErr=""; render();
-  if(typeof Peer==="undefined"){ setupErr="Не завантажилася бібліотека з'єднання. Перевірте інтернет і оновіть сторінку."; render(); return; }
-  if(peer){ try{ peer.destroy(); }catch(e){} }
-  peer = new Peer(HOST_PREFIX + code);
-  peer.on("open", ()=>{
-    if(restore){ G=restore.G; players.clear(); restore.players.forEach(p=>players.set(p.pid,{...p, conn:null, online:false})); }
-    else { G={code, limit:G.limit, phase:"lobby", q:-1, endsAt:null}; players.clear(); }
-    G.code=code; save(); render();
-  });
-  peer.on("connection", c=>{
-    c.on("open", ()=>c.send({type:"hello", roster:ROSTER.map(r=>r.name), phase:G.phase}));
-    c.on("data", d=>onMessage(c,d));
-    c.on("close", ()=>{ for(const p of players.values()) if(p.conn===c){ p.online=false; p.conn=null; } render(); });
-  });
-  peer.on("disconnected", ()=>{ try{ peer.reconnect(); }catch(e){} });
-  peer.on("error", e=>{
-    if(e.type==="unavailable-id"){ setupErr="Код "+code+" уже зайнятий іншою грою. Оберіть інший код."; G.phase="setup"; render(); }
-    else if(e.type==="network"||e.type==="server-error"||e.type==="socket-error"){ toast("Проблема зі зв'язком. Перевірте інтернет."); if(G.phase==="setup"){ setupErr="Немає зв'язку з сервером. Перевірте інтернет."; render(); } }
+function connect(){
+  if(client) return;
+  if(typeof mqtt==="undefined"){ setupErr="Не завантажилася бібліотека з'єднання. Перевірте інтернет і оновіть сторінку."; render(); return; }
+  client = mqtt.connect(BROKER, {clientId:"mvh_"+token+"_"+Math.random().toString(36).slice(2,6), clean:true, reconnectPeriod:2000, connectTimeout:10000, keepalive:30});
+  client.on("connect", ()=>{ connected=true; if(G.code && G.phase!=="setup"){ client.subscribe(TOPIC+G.code+"/up",{qos:1}); publishState(); } render(); });
+  client.on("offline", ()=>{ connected=false; render(); });
+  client.on("close", ()=>{ connected=false; });
+  client.on("message", (topic, payload)=>{
+    let m; try{ m=JSON.parse(payload.toString()); }catch(e){ return; }
+    if(topic===TOPIC+G.code+"/up") onUp(m);
+    else if(checkHandler && topic===TOPIC+checkCode+"/state") checkHandler(m);
   });
 }
+const pub = (sub, obj, retain) => { if(client && connected) client.publish(TOPIC+G.code+"/"+sub, obj==null?"":JSON.stringify(obj), {qos:1, retain:!!retain}); };
 
-function onMessage(c, d){
-  if(!d||typeof d!=="object") return;
-  if(d.type==="join"){
-    const pid=String(d.pid||"").slice(0,20); let name=String(d.name||"").trim().replace(/\s+/g," ").slice(0,40);
-    if(!pid||!name) return c.send({type:"join_err", msg:"Введіть ім'я."});
+// Before opening a game: make sure nobody else is using this code right now
+let checkHandler=null, checkCode="";
+function openGame(code, restore){
+  setupErr=""; checking=true; render();
+  connect();
+  const doCheck = ()=>{
+    checkCode=code;
+    let done=false;
+    const finish=(busyBy)=>{
+      if(done) return; done=true; checkHandler=null; client.unsubscribe(TOPIC+code+"/state");
+      if(busyBy){ checking=false; setupErr="Код "+code+" уже використовує інша гра. Оберіть інший."; render(); return; }
+      start(code, restore);
+    };
+    checkHandler=(m)=>{ const busy = m && m.phase && m.phase!=="closed-game" && m.host && m.host!==token && (Date.now()-(m.at||0) < 3*3600*1000); finish(busy); };
+    client.subscribe(TOPIC+code+"/state",{qos:1});
+    setTimeout(()=>finish(false), 2500);   // no retained state = code is free
+  };
+  if(connected) doCheck();
+  else {
+    const t=setTimeout(()=>{ if(!connected){ checking=false; setupErr="Не вдалося з'єднатися з сервером. Перевірте інтернет і спробуйте ще раз."; render(); } }, 12000);
+    client.once("connect", ()=>{ clearTimeout(t); doCheck(); });
+  }
+}
+function start(code, restore){
+  checking=false;
+  if(restore){ G=restore.G; players.clear(); restore.players.forEach(p=>players.set(p.pid,{...p, drafts:{}})); }
+  else { G={code, gid:Math.random().toString(36).slice(2,10), limit:G.limit, phase:"lobby", q:-1, endsAt:null}; players.clear(); }
+  G.code=code;
+  client.subscribe(TOPIC+code+"/up",{qos:1});
+  publishState(); for(const p of players.values()) sendPersonal(p);
+  save(); render();
+}
+
+function onUp(m){
+  if(!m||typeof m!=="object"||!m.pid) return;
+  const pid=String(m.pid).slice(0,24);
+  if(m.type==="hello"){ const p=players.get(pid); if(p) sendPersonal(p); return; }
+  if(m.type==="join"){
+    let name=String(m.name||"").trim().replace(/\s+/g," ").slice(0,40);
+    if(!name) return pub("to/"+pid,{gid:G.gid, err:"Введіть ім'я."},true);
     let info="";
     if(ROSTER.length){
       const hit=ROSTER.find(r=>norm(r.name)===norm(name));
-      if(!hit) return c.send({type:"join_err", msg:"Такого імені немає у списку. Почніть писати й оберіть себе з підказок."});
+      if(!hit) return pub("to/"+pid,{gid:G.gid, err:"Такого імені немає у списку. Почніть писати й оберіть себе з підказок."},true);
       name=hit.name; info=hit.info||"";
     }
     const clash=[...players.values()].find(p=>p.pid!==pid && norm(p.name)===norm(name));
-    if(clash) return c.send({type:"join_err", msg: clash.online ? "Це ім'я вже використовує інший учасник." : "Це ім'я вже в грі. Попросіть ведучого прибрати старий запис."});
+    if(clash) return pub("to/"+pid,{gid:G.gid, err:"Це ім'я вже зайняте. Додайте першу літеру прізвища."},true);
     let p=players.get(pid);
-    if(!p){ p={pid, name, info, answers:{}, away:{}, verdict:{}, joinedAt:Date.now()}; players.set(pid,p); }
-    p.name=name; p.info=info; p.conn=c; p.online=true;
-    c.send({type:"joined", name, info});
-    sendState(p); save(); render();
-    return;
+    if(!p){ p={pid, name, info, answers:{}, away:{}, verdict:{}, drafts:{}, joinedAt:Date.now()}; players.set(pid,p); }
+    p.name=name; p.info=info;
+    sendPersonal(p); save(); render(); return;
   }
-  const p=[...players.values()].find(x=>x.conn===c); if(!p) return;
-  if(d.type==="answer"){
-    if(G.phase!=="open"||d.q!==G.q) return sendState(p);
-    if(G.endsAt && Date.now()>G.endsAt+1500) return sendState(p);
-    const t=String(d.text||"").trim().slice(0,60); if(!t) return;
-    p.answers[G.q]=t; sendState(p); save(); render();
-  } else if(d.type==="away"){
-    if(G.phase!=="open"||d.q!==G.q) return;
+  const p=players.get(pid); if(!p) return;
+  if(m.type==="draft"){
+    if(G.phase!=="open"||m.q!==G.q) return;
+    p.drafts[G.q]=String(m.text||"").slice(0,60); renderTyping(); return;
+  }
+  if(m.type==="answer"){
+    if(G.phase!=="open"||m.q!==G.q) return sendPersonal(p);
+    if(G.endsAt && Date.now()>G.endsAt+1500) return sendPersonal(p);
+    const t=String(m.text||"").trim().slice(0,60); if(!t) return;
+    p.answers[G.q]=t; p.drafts[G.q]=t; sendPersonal(p); save(); render(); return;
+  }
+  if(m.type==="away"){
+    if(G.phase!=="open"||m.q!==G.q) return;
     p.away[G.q]=(p.away[G.q]||0)+1; save(); render();
   }
 }
 
-function sendState(p){
-  if(!p.conn||!p.online) return;
+function publishState(){
+  if(!G.code) return;
   const q=G.q, Q=QUESTIONS[q];
-  const msg={type:"state", phase:G.phase, q, total:TOTAL, limit:G.limit,
-    question: (q>=0&&Q&&G.phase!=="lobby") ? {text:Q.text, ask:Q.ask} : null,
-    remainingMs: (G.phase==="open"&&G.endsAt) ? G.endsAt-Date.now() : null,
-    myAnswer: q>=0 ? (p.answers[q]||"") : ""};
-  if(G.phase==="reveal") msg.reveal={title:Q.title, artist:Q.artist, correct:verdict(p,q).v};
-  if(G.phase==="final"){ const r=ranking(); msg.podium=r.filter(x=>x.place<=3).map(x=>({name:x.name,score:x.score,place:x.place})); const me=r.find(x=>x.pid===p.pid); if(me){ msg.myPlace=me.place; msg.myScore=me.score; } }
-  try{ p.conn.send(msg); }catch(e){}
+  const st={gid:G.gid, host:token, at:Date.now(), phase:G.phase, q, total:TOTAL, limit:G.limit, roster:ROSTER.map(r=>r.name),
+    question:(q>=0&&Q&&G.phase!=="lobby")?{text:Q.text, ask:Q.ask}:null,
+    remainingMs:(G.phase==="open"&&G.endsAt)?Math.max(0,G.endsAt-Date.now()):null};
+  if(G.phase==="reveal") st.reveal={title:Q.title, artist:Q.artist};
+  if(G.phase==="final") st.podium=ranking().filter(r=>r.place<=3).map(r=>({pid:r.pid,name:r.name,score:r.score,place:r.place}));
+  pub("state", st, true);
 }
-function broadcast(){ for(const p of players.values()) sendState(p); save(); render(); }
+function sendPersonal(p){
+  const msg={gid:G.gid, name:p.name, info:p.info, answers:p.answers, marks:{}};
+  for(let i=0;i<TOTAL;i++){ if(G.phase==="reveal"&&i===G.q || i<G.q || G.phase==="final") msg.marks[i]=verdict(p,i).v===true; }
+  if(G.phase==="final"){ const r=ranking().find(x=>x.pid===p.pid); if(r){ msg.place=r.place; msg.score=r.score; } }
+  pub("to/"+p.pid, msg, true);
+}
+function broadcast(){ publishState(); for(const p of players.values()) sendPersonal(p); save(); render(); }
 
 /* ---------- host actions ---------- */
 function goTo(q){ G.q=q; G.phase="open"; G.endsAt=G.limit?Date.now()+G.limit*1000:null; peek=false; broadcast(); }
 function closeQ(){ G.phase="closed"; G.endsAt=null; broadcast(); }
 function reveal(){ G.phase="reveal"; G.endsAt=null; broadcast(); }
 function finish(){ G.phase="final"; G.endsAt=null; broadcast(); }
-function mark(p,q,v){ p.verdict[q]=v; if(G.phase==="reveal"&&q===G.q) sendState(p); save(); render(); }
-function kick(p){ try{ p.conn&&p.conn.send({type:"join_err", msg:"Ведучий прибрав вас із гри. Введіть ім'я ще раз."}); }catch(e){} players.delete(p.pid); save(); render(); }
+function mark(p,q,v){ p.verdict[q]=v; sendPersonal(p); save(); render(); }
+function kick(p){ pub("to/"+p.pid,{gid:G.gid, err:"Ведучий прибрав вас із гри. Введіть ім'я ще раз."},true); players.delete(p.pid); save(); render(); }
 function endSession(){
-  for(const p of players.values()){ try{ p.conn&&p.conn.close(); }catch(e){} }
-  try{ peer&&peer.destroy(); }catch(e){}
-  peer=null; players.clear(); G={code:"", limit:G.limit, phase:"setup", q:-1, endsAt:null};
+  if(G.code){ pub("state",{phase:"closed-game", at:Date.now()},true); for(const p of players.values()) pub("to/"+p.pid,null,true); client.unsubscribe(TOPIC+G.code+"/up"); }
+  players.clear(); G={code:"", gid:"", limit:G.limit, phase:"setup", q:-1, endsAt:null};
   try{ localStorage.removeItem("mv_host"); }catch(e){}
   typedCode=""; render();
 }
 
+let lastBeat=0;
 setInterval(()=>{
   if(G.phase==="open" && G.endsAt && Date.now()>G.endsAt+1000) closeQ();
+  if(G.phase==="open" && Date.now()-lastBeat>5000){ lastBeat=Date.now(); publishState(); }   // keeps everyone's timer in sync
   paintTimer();
 }, 500);
 
@@ -300,7 +342,18 @@ function render(){
     if(G.phase==="final") app.append(finalView());
     app.append(controls(), el("div",{class:"grid"}, questionView(), scoreView()), endView());
   }
-  paintTimer();
+  paintTimer(); renderTyping();
+}
+
+// live "what the participant is typing", updated in place
+function renderTyping(){
+  if(G.q==null||G.q<0) return;
+  document.querySelectorAll(".typing[data-pid]").forEach(s=>{
+    const p=players.get(s.getAttribute("data-pid")); if(!p) return;
+    const txt=(p.drafts[G.q]||"").trim(), sent=p.answers[G.q]||"";
+    const on=G.phase==="open" && txt && txt!==sent;
+    s.hidden=!on; s.textContent=on?txt:"";
+  });
 }
 
 function limitPicker(){
@@ -336,10 +389,10 @@ function setupView(){
 function lobbyView(){
   const ps=list();
   const chips=el("div",{class:"chips"});
-  for(const p of ps) chips.append(el("span",{class:"chip"+(p.online?"":" off")}, el("span",{text:p.name+(p.info?" · "+p.info:"")}),
+  for(const p of ps) chips.append(el("span",{class:"chip"}, el("span",{text:p.name+(p.info?" · "+p.info:"")}),
     el("button",{type:"button",title:"Прибрати","aria-label":"Прибрати: "+p.name,text:"×",onclick:()=>kick(p)})));
   return el("div",{class:"lobby"},
-    el("div",{class:"codebox"}, el("span",{class:"label",text:"Код гри"}), el("span",{class:"code",text:G.code}), el("span",{text:"Відкрийте сторінку учасника і введіть цей код"})),
+    el("div",{class:"codebox"}, el("span",{class:"label",text:"Код гри"}), el("span",{class:"code",text:G.code}), el("span",{text:"Відкрийте сторінку учасника і введіть цей код"}), connected?null:el("span",{style:"color:#B3261E;font-weight:800",text:"Немає зв'язку з сервером…"})),
     el("div",{class:"panel"},
       el("div",{class:"row"},
         el("div",null, el("span",{class:"label",text:"Зареєструвалися"}), el("div",{class:"count",text:String(ps.length)})),
@@ -347,7 +400,7 @@ function lobbyView(){
         el("button",{class:"primary big",type:"button",text:"Почати гру",disabled:!ps.length,onclick:()=>goTo(0)})),
       ps.length?chips:el("p",{class:"muted",text:"Поки нікого. Імена з'являтимуться тут, щойно учасники введуть код і ім'я."}),
       limitPicker(), rosterNote(),
-      el("p",{class:"note",text:"Хрестик прибирає учасника (наприклад, дубль). Не закривайте цю сторінку під час гри: учасники з'єднані саме з нею."})));
+      el("p",{class:"note",text:"Хрестик прибирає учасника (наприклад, дубль). Не закривайте цю сторінку під час гри. Якщо випадково закрили, відкрийте знову й натисніть «Продовжити попередню гру»."})));
 }
 
 function controls(){
@@ -388,10 +441,11 @@ function questionView(){
         el("button",{type:"button",class:r.manual&&r.v===true?"on-good":"",title:"Зарахувати","aria-label":"Зарахувати: "+p.name,text:"✓",onclick:()=>mark(p,q,true)}),
         el("button",{type:"button",class:r.manual&&r.v===false?"on-bad":"",title:"Не зараховувати","aria-label":"Не зараховувати: "+p.name,text:"✗",onclick:()=>mark(p,q,false)})),
       el("span",{class:"txt"+(t?"":" none"),text:t||"немає відповіді"}),
+      el("span",{class:"typing","data-pid":p.pid,hidden:true}),
       el("div",{class:"row"},
         r.v!==null ? el("span",{class:"note",text:r.manual?"оцінено вручну":"автоперевірка"}) : null,
         p.away[q] ? el("span",{class:"pill warn",text:"⚠ виходив зі сторінки: "+p.away[q]+"×"}) : null,
-        p.online ? null : el("span",{class:"pill off",text:"не в мережі"}))));
+        null)));
   }
   panel.append(el("div",{class:"row"},
     el("span",{class:"pill wait",text:"Відповіли: "+ans+" з "+ps.length}), el("span",{class:"pill good",text:"✓ "+good}), el("span",{class:"pill bad",text:"✗ "+bad})),
@@ -443,8 +497,8 @@ function paintTimer(){
   $("secs").textContent=s+" с";
 }
 
-window.addEventListener("beforeunload", e=>{ if(G.phase!=="setup"){ e.preventDefault(); e.returnValue=""; } });
 render();
+connect();
 </script>
 </body>
 </html>
